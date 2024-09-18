@@ -19,6 +19,8 @@ async def create_user_submission(
     session: AsyncSession = Depends(db_helper.scoped_session_dependency),
 ):
     # Декодирование изображения из base64
+    if submission.image[:4] == "data":
+        submission.image = submission.image[len("data:image/jpeg;base64"):]
     try:
         image_data = base64.b64decode(submission.image)
     except:
