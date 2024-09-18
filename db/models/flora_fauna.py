@@ -4,7 +4,6 @@ from .base import Base
 class FloraFauna(Base):
     __tablename__ = "flora_fauna"
 
-    id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     description = Column(Text, nullable=True)
     category = Column(String, nullable=False)  # 'flora' или 'fauna'

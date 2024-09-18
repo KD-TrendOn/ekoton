@@ -50,6 +50,280 @@ project_root/
 ├── requirements.txt
 ├── README.md
 └── .env
+
+app/api/v1/endpoints/submission.py
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from typing import Any
+import base64
+from app.schemas.submissions import SubmissionCreate, SubmissionResponse
+from app.ml.classifier import classify_image
+from db.crud import create_submission
+from db.models import Submission
+from db.db_helper import db_helper
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.dependencies import get_current_user
+
+router = APIRouter(
+    prefix="/submissions",
+    tags=["Submissions"],
+)
+
+@router.post("/", response_model=SubmissionResponse)
+async def create_user_submission(
+    image: UploadFile = File(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    current_user: Any = Depends(get_current_user),
+    session: AsyncSession = Depends(db_helper.get_session),
+):
+    # Проверка типа файла
+    if image.content_type not in ["image/jpeg", "image/png"]:
+        raise HTTPException(status_code=400, detail="Invalid image type.")
+
+    # Чтение изображения
+    content = await image.read()
+    encoded_image = base64.b64encode(content).decode('utf-8')
+
+    # Классификация изображения
+    object_class = classify_image(content)
+
+    # Создание объекта Submission
+    submission = Submission(
+        user_id=current_user.id,
+        image=encoded_image,
+        latitude=latitude,
+        longitude=longitude,
+        object_class=object_class,
+    )
+
+    # Сохранение в базу данных
+    await create_submission(session, submission)
+
+    return SubmissionResponse(
+        id=submission.id,
+        object_class=submission.object_class,
+        latitude=submission.latitude,
+        longitude=submission.longitude,
+        status=submission.status,
+        created_at=submission.created_at,
+    )
+
+app/core/config.py
+from pydantic import BaseSettings
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    DB_ECHO: bool = False
+    POSTGRES_HOST: str
+    POSTGRES_PORT: int
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
+    # Добавь другие настройки при необходимости
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+app/core/logger.py
+
+import logging
+
+def setup_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    return logger
+
+logger = setup_logger(__name__)
+
+app/schemas/submissions.py
+
+from pydantic import BaseModel
+from datetime import datetime
+
+class SubmissionCreate(BaseModel):
+    latitude: float
+    longitude: float
+
+class SubmissionResponse(BaseModel):
+    id: int
+    object_class: str
+    latitude: float
+    longitude: float
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+db/models/base.py
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, declared_attr
+
+class Base(DeclarativeBase):
+    __abstract__ = True
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return f"{cls.__name__.lower()}s"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+db/models/flora_fauna.py
+
+from sqlalchemy import Column, String, Text, Integer
+from .base import Base
+
+class FloraFauna(Base):
+    __tablename__ = "flora_fauna"
+
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String, nullable=False)  # 'flora' или 'fauna'
+    habitat = Column(String, nullable=True)
+    characteristics = Column(Text, nullable=True)
+
+db/models/moderator.py
+from sqlalchemy import Column, String, DateTime, Integer
+from sqlalchemy.sql import func
+from .base import Base
+
+class Moderator(Base):
+    __tablename__ = "moderators"
+
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+db/models/report.py
+
+from sqlalchemy import Column, String, Text, DateTime, Integer
+from sqlalchemy.sql import func
+from .base import Base
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    generated_at = Column(DateTime(timezone=True), server_default=func.now())
+    content = Column(Text, nullable=False)  # JSON или текст отчета
+
+db/models/submission.py
+
+from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from .base import Base
+
+class Submission(Base):
+    __tablename__ = "submissions"
+
+    image = Column(String, nullable=False)  # base64 строка изображения
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    object_class = Column(String, nullable=False)  # 'flora' или 'fauna'
+    status = Column(String, default="pending")  # 'pending', 'approved', 'rejected'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+db/models/task.py
+
+from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, ForeignKey
+from sqlalchemy.sql import func
+from .base import Base
+from sqlalchemy.orm import relationship
+class Task(Base):
+    __tablename__ = "tasks"
+    image = Column(Text, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    target_flora = Column(String, nullable=True)  # Названия растений
+    target_fauna = Column(String, nullable=True)  # Названия животных
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+db/crud.py
+
+# db/crud.py
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from db.models import Submission, User
+from typing import List
+
+async def create_submission(session: AsyncSession, submission: Submission) -> Submission:
+    session.add(submission)
+    await session.commit()
+    await session.refresh(submission)
+    return submission
+
+async def get_submissions(session: AsyncSession, skip: int = 0, limit: int = 10) -> List[Submission]:
+    stmt = select(Submission).offset(skip).limit(limit)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+async def get_submission_by_id(session: AsyncSession, submission_id: int) -> Submission:
+    stmt = select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.user))
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+# Добавь аналогичные функции для других моделей по необходимости
+
+db/db_helper.py
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    create_async_engine,
+    async_sessionmaker,
+    async_scoped_session,
+)
+from app.core.config import settings
+from asyncio import current_task
+
+class DatabaseHelper:
+    def __init__(self, url: str, echo: bool = False):
+        self.engine = create_async_engine(url=url, echo=echo)
+        self.session_factory = async_sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+
+    async def get_session(self) -> AsyncSession:
+        async with self.session_factory() as session:
+            yield session
+    
+    def get_scoped_session(self):
+        session = async_scoped_session(
+            session_factory=self.session_factory,
+            scopefunc=current_task,
+        )
+        return session
+
+    async def session_dependency(self) -> AsyncSession:
+        async with self.session_factory() as session:
+            yield session
+            await session.close()
+
+    async def scoped_session_dependency(self) -> AsyncSession:
+        session = self.get_scoped_session()
+        yield session
+        await session.close()
+
+db_helper = DatabaseHelper(url=settings.DATABASE_URL, echo=settings.DB_ECHO)
+
+
+
 Платформа для граждан и краудсорсинг заказов.
 
 Идея - департамент направляет задание на сайт которое отображается у всех пользователей. 
@@ -108,398 +382,134 @@ project_root/
 
 Задания департамента - от них это просто запрос на платформу о том, что в некоторой области они собираются запросить у граждан фотографии флоры и фауны, а гражданам пользователям на платформе можно зайти на это задание и сфоткать что то и получить бонусы.(систему с бонусами делать для mvp не надо)
 
-Пример как я использовал postgres в своих проектах:
 
-
-core/models/base.py
-
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, declared_attr
-
-class Base(DeclarativeBase):
-    __abstract__ = True
-
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        return f"{cls.__name__.lower()}s"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-
-core/models/chat.py
-
-from typing import TYPE_CHECKING
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from .base import Base
-
-if TYPE_CHECKING:
-    from .message import Message
-    from .daily_report import DailyReport
-    from .dashboard_stats import DashboardStats
-
-class Chat(Base):
-    chat_id: Mapped[str] = mapped_column(unique=True, index=True)
-    name: Mapped[str]
-
-    messages: Mapped[list["Message"]] = relationship(back_populates="chat")
-    daily_reports: Mapped[list["DailyReport"]] = relationship(back_populates="chat")
-    dashboard_stats: Mapped[list["DashboardStats"]] = relationship(back_populates="chat")
-
-
-core/models/daily_report.py
-
-from datetime import datetime
-from sqlalchemy import JSON
-from sqlalchemy.orm import Mapped, mapped_column
-from .base import Base
-from .mixins import ChatRelationMixin
-
-class DailyReport(ChatRelationMixin, Base):
-    _chat_back_populates = "daily_reports"
-
-    date: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    summary: Mapped[str]
-    statistics: Mapped[dict] = mapped_column(JSON)
-
-
-core/models/dashboard_stats.py
-
-from datetime import datetime
-from sqlalchemy import JSON
-from sqlalchemy.orm import Mapped, mapped_column
-from .base import Base
-from .mixins import ChatRelationMixin
-
-class DashboardStats(ChatRelationMixin, Base):
-    _chat_back_populates = "dashboard_stats"
-
-    timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    stats: Mapped[dict] = mapped_column(JSON)
-
-
-core/models/db_helper.py
-
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from core.config import settings
-
-class DatabaseHelper:
-    def __init__(self, url: str, echo: bool = False):
-        self.engine = create_async_engine(url=url, echo=echo)
-        self.async_session = async_sessionmaker(
-            bind=self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-
-    async def get_session(self) -> AsyncSession:
-        async with self.async_session() as session:
-            yield session
-
-db_helper = DatabaseHelper(url=settings.DATABASE_URL, echo=settings.DB_ECHO)
-
-
-core/models/message.py
-
-from datetime import datetime
-from sqlalchemy import String, DateTime, ARRAY
-from sqlalchemy.orm import Mapped, mapped_column
-from .base import Base
-from .mixins import ChatRelationMixin
-
-class Message(ChatRelationMixin, Base):
-    _chat_back_populates = "messages"
-
-    user_id: Mapped[str] = mapped_column(String, index=True)
-    content: Mapped[str] = mapped_column(String)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    sentiment: Mapped[str] = mapped_column(String)
-    action_type: Mapped[str] = mapped_column(String)
-    potential_threats: Mapped[list[str]] = mapped_column(ARRAY(String))
-    key_topics: Mapped[list[str]] = mapped_column(ARRAY(String))
-
-core/models/mixins.py
-
-from typing import TYPE_CHECKING
-from sqlalchemy import ForeignKey
-from sqlalchemy.orm import declared_attr, Mapped, mapped_column, relationship
-
-if TYPE_CHECKING:
-    from .chat import Chat
-
-class ChatRelationMixin:
-    _chat_id_nullable: bool = False
-    _chat_id_unique: bool = False
-    _chat_back_populates: str | None = None
-
-    @declared_attr
-    def chat_id(cls) -> Mapped[str]:
-        return mapped_column(
-            ForeignKey("chats.chat_id"),
-            unique=cls._chat_id_unique,
-            nullable=cls._chat_id_nullable,
-        )
-
-    @declared_attr
-    def chat(cls) -> Mapped["Chat"]:
-        return relationship(
-            "Chat",
-            back_populates=cls._chat_back_populates,
-        )
-
-
-core/config.py
-
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    DATABASE_URL: str
-    DB_ECHO: bool = False
-    POSTGRES_HOST: str
-    POSTGRES_PORT: int
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    # ... другие настройки ...
-
-    class Config:
-        env_file = "db.env"
-
-settings = Settings()
-
-bot/database/crud.py
-
-from sqlalchemy import select, func, distinct
-from sqlalchemy.sql import text
-from sqlalchemy.dialects.postgresql import array_agg
-from typing import Dict, List, Optional
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.ext.asyncio import AsyncSession
-from core.models.db_helper import db_helper
-from core.models.chat import Chat
-from core.models.message import Message
-from core.models.daily_report import DailyReport
-from core.models.dashboard_stats import DashboardStats
-from ..schemas.state import DashboardStats as DashboardStatsSchema
-from datetime import datetime, timedelta
-from core.models.daily_report import DailyReport
-from sqlalchemy import JSON
-from ..logger import setup_logger
-
-logger = setup_logger(__name__)
-
-async def get_all_chats() -> List[Chat]:
-    async for session in db_helper.get_session():
-        stmt = select(Chat)
-        result = await session.execute(stmt)
-        return result.scalars().all()
-
-async def get_latest_dashboard_stats(chat_id: str) -> DashboardStatsSchema:
-    async for session in db_helper.get_session():
-        stmt = select(DashboardStats).where(DashboardStats.chat_id == chat_id).order_by(DashboardStats.timestamp.desc()).limit(1)
-        result = await session.execute(stmt)
-        db_stats = result.scalar_one_or_none()
-        return DashboardStatsSchema(**db_stats.stats) if db_stats else None
-
-async def get_recent_messages(chat_id: str, limit: int = 100, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Message]:
-    async for session in db_helper.get_session():
-        query = select(Message).where(Message.chat_id == chat_id)
-        
-        if start_date:
-            query = query.where(Message.timestamp >= start_date)
-        if end_date:
-            query = query.where(Message.timestamp <= end_date)
-        
-        query = query.order_by(Message.timestamp.desc()).limit(limit)
-        
-        result = await session.execute(query)
-        return result.scalars().all()
-
-async def save_dashboard_stats(chat_id: str, stats: DashboardStatsSchema):
-    async for session in db_helper.get_session():
-        try:
-            db_stats = DashboardStats(chat_id=chat_id, stats=stats.dict())
-            session.add(db_stats)
-            await session.commit()
-            logger.info(f"Dashboard stats saved for chat {chat_id}")
-        except Exception as e:
-            logger.exception(f"Error saving dashboard stats for chat {chat_id}")
-            await session.rollback()
-            raise
-
-async def save_daily_report(chat_id: str, report: str, stats: dict):
-    async for session in db_helper.get_session():
-        try:
-            db_report = DailyReport(
-                chat_id=chat_id,
-                summary=report,
-                statistics=stats  # Добавляем статистику
-            )
-            session.add(db_report)
-            await session.commit()
-            logger.info(f"Daily report saved for chat {chat_id}")
-        except Exception as e:
-            logger.exception(f"Error saving daily report for chat {chat_id}")
-            await session.rollback()
-            raise
-
-
-async def get_weekly_stats(chat_id: str, start_date: datetime, end_date: datetime) -> Dict:
-    async for session in db_helper.get_session():
-        # Базовый запрос
-        base_query = select(Message).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        ).subquery()
-
-        # Общее количество сообщений и активных пользователей
-        count_query = select(
-            func.count().label('total_messages'),
-            func.count(distinct(base_query.c.user_id)).label('active_users')
-        )
-        
-        count_result = await session.execute(count_query)
-        counts = count_result.fetchone()
-
-        # Распределение по настроению
-        sentiment_query = select(
-            base_query.c.sentiment,
-            func.count().label('count')
-        ).group_by(base_query.c.sentiment)
-        
-        sentiment_result = await session.execute(sentiment_query)
-        sentiment_distribution = dict(sentiment_result.fetchall())
-
-        # Распределение по типу действия
-        action_query = select(
-            base_query.c.action_type,
-            func.count().label('count')
-        ).group_by(base_query.c.action_type)
-        
-        action_result = await session.execute(action_query)
-        action_type_distribution = dict(action_result.fetchall())
-
-        # Ключевые темы и потенциальные угрозы
-        topics_query = select(func.unnest(base_query.c.key_topics).label('topic')).distinct()
-        threats_query = select(func.unnest(base_query.c.potential_threats).label('threat')).distinct()
-        
-        topics_result = await session.execute(topics_query)
-        threats_result = await session.execute(threats_query)
-        
-        key_topics = [row.topic for row in topics_result.fetchall() if row.topic]
-        potential_threats = [row.threat for row in threats_result.fetchall() if row.threat]
-
-        return {
-            'total_messages': counts.total_messages,
-            'active_users': counts.active_users,
-            'sentiment_distribution': sentiment_distribution,
-            'action_type_distribution': action_type_distribution,
-            'key_topics': key_topics,
-            'potential_threats': potential_threats
-        }
-
-
-async def get_top_topics(chat_id: str, start_date: datetime, end_date: datetime, limit: int = 10) -> List[str]:
-    async for session in db_helper.get_session():
-        stmt = select(
-            Message.key_topics,
-            func.count(Message.id).label('count')
-        ).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        ).group_by(
-            Message.key_topics
-        ).order_by(
-            func.count(Message.id).desc()
-        ).limit(limit)
-        result = await session.execute(stmt)
-        return [", ".join(row.key_topics) for row in result.all()]
-
-async def get_weekly_threats(chat_id: str, start_date: datetime, end_date: datetime) -> List[str]:
-    async for session in db_helper.get_session():
-        stmt = select(Message.potential_threats).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date),
-            Message.potential_threats != None
-        )
-        result = await session.execute(stmt)
-        threats = [threat for row in result.all() for threat in row.potential_threats]
-        return list(set(threats))  # Remove duplicates
-
-async def save_message(chat_id: str, user_id: str, content: str, sentiment: str, action_type: str, potential_threats: List[str], key_topics: List[str]):
-    async for session in db_helper.get_session():
-        message = Message(
-            chat_id=chat_id,
-            user_id=user_id,
-            content=content,
-            sentiment=sentiment,
-            action_type=action_type,
-            potential_threats=potential_threats,
-            key_topics=key_topics
-        )
-        session.add(message)
-        await session.commit()
-        return message
-
-async def get_daily_stats(chat_id: str, start_date: datetime, end_date: datetime):
-    async for session in db_helper.get_session():
-        # Запрос для подсчета сообщений и активных пользователей
-        count_query = select(
-            func.count(Message.id).label('total_messages'),
-            func.count(distinct(Message.user_id)).label('active_users')
-        ).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        )
-        
-        # Запрос для распределения настроений
-        sentiment_query = select(
-            Message.sentiment,
-            func.count(Message.id).label('count')
-        ).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        ).group_by(Message.sentiment)
-        
-        # Запрос для распределения типов действий
-        action_query = select(
-            Message.action_type,
-            func.count(Message.id).label('count')
-        ).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        ).group_by(Message.action_type)
-        
-        # Запрос для ключевых тем
-        topics_query = select(
-            func.unnest(Message.key_topics).label('topic'),
-            func.count().label('count')
-        ).where(
-            Message.chat_id == chat_id,
-            Message.timestamp.between(start_date, end_date)
-        ).group_by(text('topic')).order_by(text('count DESC')).limit(5)
-        
-        # Выполнение запросов
-        counts_result = await session.execute(count_query)
-        counts = counts_result.first()
-        
-        sentiments_result = await session.execute(sentiment_query)
-        sentiments = {row.sentiment: row.count for row in sentiments_result}
-        
-        actions_result = await session.execute(action_query)
-        actions = {row.action_type: row.count for row in actions_result}
-        
-        topics_result = await session.execute(topics_query)
-        topics = {row.topic: row.count for row in topics_result}
-        
-        return {
-            'message_count': counts.total_messages if counts else 0,
-            'active_users': counts.active_users if counts else 0,
-            'sentiment_distribution': sentiments,
-            'action_distribution': actions,
-            'top_topics': topics
-        }
-
-ЭТОТ ПРИМЕР БЫЛ ТОЛЬКО ДЛЯ ОЗНАКОМЛЕНИЯ, НЕ НАДО ПОВТОРЯТЬ ТЕ ЖЕ МЕТОДЫ CRUD.
 Теперь про api и нейронку.
 Давай сделаем прогу для ее обучения, и потом в api посмотрим как будет выглядеть inference.
 
 Далее нужно сделать все описанные функциональные компоненты, эндпоинты к ним, а также задуматься как департамент может их изменять и расширять. Оцениваться будет именно кодовая база, поэтому хорошо поработаем над проектом.
+
+Нам не нужно сейчас думать про геолокацию заданий и отчетов, а также я удалил файл users. Мы не будем делать регистрацию, и геолокация для mvp будет только одна - заповедник Москворечье. Его рамки по широте и долготе у меня есть, будем его считать за прямоугольник.
+
+Давай продолжать работу по тем файлам которые есть и которых нет. Нам во первых нужно поменять роутер для загрузки фото, так как фронтенд будет отправлять мне image:base64, latitude:float и longitude:float. И не надо это делать через forms, лучше через post запрос и получение определенного json.
+
+Насчет нейронной сети:
+Мы будем использовать дообученный на классификацию животных openclip:
+
+Haofeng
+/
+CLIP_animal_classification 
+
+like
+0
+
+License:
+mit
+Model card
+Files and versions
+Community
+Overview
+This model is based on CLIP model and test on four kinds of animal datasets and ten kinds of animal datasets. CLIP model is a zero-shot pre-trained model so we don't need train model. We just input possible classes and image dataset to use model. Possible classes can be defined by yourself, it can be dataset labels or other description.
+
+Text-image matching
+Model Input
+Class = ["dog", "cat", "rabbit","squirrel"]
+image = preprocess(Image.open("/content/drive/MyDrive/Transformer_CLIP/Golden_Retriever.jpeg")).unsqueeze(0).to(device)
+text = clip.tokenize(Class).to(device)
+
+Model Process
+with torch.no_grad():
+    image_features = model.encode_image(image)
+    text_features = model.encode_text(text)
+    
+    logits_per_image, logits_per_text = model(image, text)
+    probs = logits_per_image.softmax(dim=-1).cpu().numpy()
+
+res = 0
+pos = -1
+for j in range(len(probs[0])):
+  if probs[0][j] > res:
+    res = probs[0][j]
+    pos = j
+
+
+print("The options available are: " + str(Class))
+for i in range(len(probs[0])):
+  print("The probability of " + str(Class[i]) + " is " + str(probs[0][i]))
+
+print("Model thinks this photo is most likely a " + Class[pos])
+
+
+# Другой файл
+
+!pip install ftfy regex tqdm
+!pip install git+https://github.com/openai/CLIP.git
+Requirement already satisfied: ftfy in /usr/local/lib/python3.7/dist-packages (6.1.1)
+Requirement already satisfied: regex in /usr/local/lib/python3.7/dist-packages (2019.12.20)
+Requirement already satisfied: tqdm in /usr/local/lib/python3.7/dist-packages (4.64.0)
+Requirement already satisfied: wcwidth>=0.2.5 in /usr/local/lib/python3.7/dist-packages (from ftfy) (0.2.5)
+Collecting git+https://github.com/openai/CLIP.git
+  Cloning https://github.com/openai/CLIP.git to /tmp/pip-req-build-06_4ghuz
+  Running command git clone -q https://github.com/openai/CLIP.git /tmp/pip-req-build-06_4ghuz
+Requirement already satisfied: ftfy in /usr/local/lib/python3.7/dist-packages (from clip==1.0) (6.1.1)
+Requirement already satisfied: regex in /usr/local/lib/python3.7/dist-packages (from clip==1.0) (2019.12.20)
+Requirement already satisfied: tqdm in /usr/local/lib/python3.7/dist-packages (from clip==1.0) (4.64.0)
+Requirement already satisfied: torch in /usr/local/lib/python3.7/dist-packages (from clip==1.0) (1.10.0+cu111)
+Requirement already satisfied: torchvision in /usr/local/lib/python3.7/dist-packages (from clip==1.0) (0.11.1+cu111)
+Requirement already satisfied: wcwidth>=0.2.5 in /usr/local/lib/python3.7/dist-packages (from ftfy->clip==1.0) (0.2.5)
+Requirement already satisfied: typing-extensions in /usr/local/lib/python3.7/dist-packages (from torch->clip==1.0) (4.1.1)
+Requirement already satisfied: pillow!=8.3.0,>=5.3.0 in /usr/local/lib/python3.7/dist-packages (from torchvision->clip==1.0) (7.1.2)
+Requirement already satisfied: numpy in /usr/local/lib/python3.7/dist-packages (from torchvision->clip==1.0) (1.21.6)
+import os
+import numpy as np
+import torch
+import clip
+import cv2
+from PIL import Image
+from google.colab import drive
+drive.mount('/content/drive')
+Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount("/content/drive", force_remount=True).
+Class = ["Buffalo", "Elephant", "Rhino","Zebra"]
+Class_dic = {1:"Buffalo", 2:"Elephant", 3:"Rhino", 4:"Zebra"}
+image_labels = []
+image_file = []
+path = "/content/drive/MyDrive/Transformer_CLIP/Data"
+
+
+for i in Class:
+    paths = path + '/' + i
+    images = os.listdir(paths)
+
+    for img in images:
+        
+        try:
+            image_file.append(paths + '/' + img)
+            image_labels.append(i)
+        except:
+            print("Error in " + img)
+
+print(len(image_file))
+4003
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, preprocess = clip.load("ViT-B/32", device=device)
+predict = []
+for i in image_file:
+  image = preprocess(Image.open(i)).unsqueeze(0).to(device)
+  text = clip.tokenize(["Buffalo", "Elephant", "Rhino","Zebra"]).to(device)
+
+  with torch.no_grad():
+      image_features = model.encode_image(image)
+      text_features = model.encode_text(text)
+      
+      logits_per_image, logits_per_text = model(image, text)
+      probs = logits_per_image.softmax(dim=-1).cpu().numpy()
+  
+  res = 0
+  pos = -1
+  for j in range(len(probs[0])):
+    if probs[0][j] > res:
+      res = probs[0][j]
+      pos = j + 1
+  predict.append(Class_dic[pos])
+print(predict)
+
+Начнем работу.

@@ -5,7 +5,6 @@ from .base import Base
 class Moderator(Base):
     __tablename__ = "moderators"
 
-    id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
