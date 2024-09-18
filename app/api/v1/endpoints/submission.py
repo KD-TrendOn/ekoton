@@ -16,7 +16,7 @@ router = APIRouter(
 @router.post("/", response_model=SubmissionResponse)
 async def create_user_submission(
     submission: SubmissionCreate,
-    session: AsyncSession = Depends(db_helper.get_session),
+    session: AsyncSession = Depends(db_helper.scoped_session_dependency),
 ):
     # Декодирование изображения из base64
     try:

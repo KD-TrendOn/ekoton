@@ -6,9 +6,9 @@ import io
 # Загрузка модели
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
-
+print('Model downloaded')
 # Список классов для классификации
-CLASSES = ["Buffalo", "Elephant", "Rhino", "Zebra"]
+CLASSES = ["Buffalo", "Elephant", "Rhino", "Zebra", "Beaver", "Owl"]
 
 def classify_image(image_data: bytes) -> str:
     # Преобразование байтов изображения в объект PIL Image

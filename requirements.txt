@@ -7,4 +7,7 @@ torchvision
 ftfy
 regex
 tqdm
+pydantic-settings
+asyncpg
 git+https://github.com/openai/CLIP.git
+alembic

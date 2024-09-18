@@ -1,5 +1,5 @@
 # app/api/v1/endpoints/tasks.py
-
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.tasks import TaskCreate, TaskResponse
@@ -15,7 +15,7 @@ router = APIRouter(
 @router.post("/", response_model=TaskResponse)
 async def create_new_task(
     task: TaskCreate,
-    session: AsyncSession = Depends(db_helper.get_session),
+    session: AsyncSession = Depends(db_helper.scoped_session_dependency),
 ):
     new_task = Task(**task.dict())
     created_task = await create_task(session, new_task)
@@ -23,7 +23,7 @@ async def create_new_task(
 
 @router.get("/", response_model=List[TaskResponse])
 async def get_tasks(
-    session: AsyncSession = Depends(db_helper.get_session),
+    session: AsyncSession = Depends(db_helper.scoped_session_dependency),
 ):
     tasks = await get_active_tasks(session)
     return [TaskResponse.from_orm(task) for task in tasks]

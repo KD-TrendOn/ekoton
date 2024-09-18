@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 class SubmissionCreate(BaseModel):
+    image: str
     latitude: float
     longitude: float
 
