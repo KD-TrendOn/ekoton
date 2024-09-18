@@ -1,0 +1,505 @@
+Ты оператор проекта по созданию платформы для департамента экологии "Красная книга". 
+project_root/
+├── app/
+│   ├── api/
+│   │   ├── v1/
+│   │   │   ├── endpoints/
+│   │   │   │   ├── submissions.py
+│   │   │   │   ├── admin.py
+│   │   │   │   ├── tasks.py
+│   │   │   │   └── reports.py
+│   │   │   ├── __init__.py
+│   │   ├── dependencies.py
+│   │   └── __init__.py
+│   ├── core/
+│   │   ├── config.py
+│   │   ├── logger.py
+│   │   └── __init__.py
+│   ├── ml/
+│   │   ├── classifier.py
+│   │   ├── train.py
+│   │   └── requirements.txt
+│   ├── schemas/
+│   │   ├── submissions.py
+│   │   ├── admin.py
+│   │   ├── tasks.py
+│   │   ├── reports.py
+│   │   └── __init__.py
+│   ├── main.py
+│   └── __init__.py
+├── db/
+│   ├── models/
+│   │   ├── base.py
+│   │   ├── user.py
+│   │   ├── moderator.py
+│   │   ├── submission.py
+│   │   ├── task.py
+│   │   ├── report.py
+│   │   ├── flora_fauna.py
+│   │   ├── area.py
+│   │   └── __init__.py
+│   ├── crud.py
+│   ├── db_helper.py
+│   └── __init__.py
+├── tests/
+│   ├── test_submissions.py
+│   ├── test_admin.py
+│   ├── test_tasks.py
+│   ├── test_reports.py
+│   └── __init__.py
+├── requirements.txt
+├── README.md
+└── .env
+Платформа для граждан и краудсорсинг заказов.
+
+Идея - департамент направляет задание на сайт которое отображается у всех пользователей. 
+
+
+
+
+
+
+Нужно создать веб ресурс где пользователи смогут отправить фотографию и указать данные о местоположении сделанной фотографии. Они делают это следующим способом.
+
+
+
+
+
+Разрешить получить данные о текущей геолокации. 
+Затем отправляется json на сервер, который содержит в себе base64 долготу и широту
+затем классификатор определяет что это за объект (животное или растение).
+После того, как классификатор смог распознать объект в бд отправляется данные (Время добавления, название объекта, долгота и широта).
+
+Админ панель должна включать в себя удобный просмотр карты, получение данных о конкретных данных флоры и фауны обитающих в конкретном месте, слой модерации которые фильтруют данные перед тем как они попадут в другие функции админ панели, получение данных о конкретном объекте (растение или животное), создание и отправку заданий)
+
+Сделать платформу для модераторов.
+Во первых соответствует имя объекта на объект на фотографии
+Можно как привлекать граждан
+
+
+Надо учитывать какая должна быть экология рядом с животным или растением. 
+
+
+
+
+Привлечение пользователей системой вознаграждений. 
+
+
+
+Комментарий эксперта.
+Понятно места где будем отмечать места растения или животным и желательно чтобы были характеристики по видам. 
+
+Больше по механики, нейронку можно потом обозначить. Вы не успеете сделать за 2 дня. Надо сделать mvp. 
+
+Важно учитывать что задача так же включает в себя строительство. 
+
+Я ЗАНИМАЮСЬ БЭКЕНДОМ. Моя задача сделать на fastapi доступ к нейронке которая классифицирует изображение, для прототипа можно взять самую простую с самым простым датасетом.
+
+У меня должно быть хранилище json в которых лежат изображения, класс животного и метка геолокации которые потом фронтенд полностью одним запросом получает.
+
+У меня должна быть база данных postgres, в ней должны быть:
+Таблица с модераторами, таблица с выполненными задачами модераторов(они перепроверяют изображение после нейронки)
+
+База данных с информацией о животных живущих в парке москвы. Мы можем постараться сами ее собрать из википедии.
+
+Там должно быть много характеристик.
+
+Также мы должны собрать информацию о мини областях в Москве, кадастрах и кадастровых номерах. Апи должно предоставлять отчет по полученным изображениям в пределах этой области.
+
+Задания департамента - от них это просто запрос на платформу о том, что в некоторой области они собираются запросить у граждан фотографии флоры и фауны, а гражданам пользователям на платформе можно зайти на это задание и сфоткать что то и получить бонусы.(систему с бонусами делать для mvp не надо)
+
+Пример как я использовал postgres в своих проектах:
+
+
+core/models/base.py
+
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, declared_attr
+
+class Base(DeclarativeBase):
+    __abstract__ = True
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return f"{cls.__name__.lower()}s"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+
+core/models/chat.py
+
+from typing import TYPE_CHECKING
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from .base import Base
+
+if TYPE_CHECKING:
+    from .message import Message
+    from .daily_report import DailyReport
+    from .dashboard_stats import DashboardStats
+
+class Chat(Base):
+    chat_id: Mapped[str] = mapped_column(unique=True, index=True)
+    name: Mapped[str]
+
+    messages: Mapped[list["Message"]] = relationship(back_populates="chat")
+    daily_reports: Mapped[list["DailyReport"]] = relationship(back_populates="chat")
+    dashboard_stats: Mapped[list["DashboardStats"]] = relationship(back_populates="chat")
+
+
+core/models/daily_report.py
+
+from datetime import datetime
+from sqlalchemy import JSON
+from sqlalchemy.orm import Mapped, mapped_column
+from .base import Base
+from .mixins import ChatRelationMixin
+
+class DailyReport(ChatRelationMixin, Base):
+    _chat_back_populates = "daily_reports"
+
+    date: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    summary: Mapped[str]
+    statistics: Mapped[dict] = mapped_column(JSON)
+
+
+core/models/dashboard_stats.py
+
+from datetime import datetime
+from sqlalchemy import JSON
+from sqlalchemy.orm import Mapped, mapped_column
+from .base import Base
+from .mixins import ChatRelationMixin
+
+class DashboardStats(ChatRelationMixin, Base):
+    _chat_back_populates = "dashboard_stats"
+
+    timestamp: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    stats: Mapped[dict] = mapped_column(JSON)
+
+
+core/models/db_helper.py
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from core.config import settings
+
+class DatabaseHelper:
+    def __init__(self, url: str, echo: bool = False):
+        self.engine = create_async_engine(url=url, echo=echo)
+        self.async_session = async_sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+    async def get_session(self) -> AsyncSession:
+        async with self.async_session() as session:
+            yield session
+
+db_helper = DatabaseHelper(url=settings.DATABASE_URL, echo=settings.DB_ECHO)
+
+
+core/models/message.py
+
+from datetime import datetime
+from sqlalchemy import String, DateTime, ARRAY
+from sqlalchemy.orm import Mapped, mapped_column
+from .base import Base
+from .mixins import ChatRelationMixin
+
+class Message(ChatRelationMixin, Base):
+    _chat_back_populates = "messages"
+
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    content: Mapped[str] = mapped_column(String)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sentiment: Mapped[str] = mapped_column(String)
+    action_type: Mapped[str] = mapped_column(String)
+    potential_threats: Mapped[list[str]] = mapped_column(ARRAY(String))
+    key_topics: Mapped[list[str]] = mapped_column(ARRAY(String))
+
+core/models/mixins.py
+
+from typing import TYPE_CHECKING
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import declared_attr, Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from .chat import Chat
+
+class ChatRelationMixin:
+    _chat_id_nullable: bool = False
+    _chat_id_unique: bool = False
+    _chat_back_populates: str | None = None
+
+    @declared_attr
+    def chat_id(cls) -> Mapped[str]:
+        return mapped_column(
+            ForeignKey("chats.chat_id"),
+            unique=cls._chat_id_unique,
+            nullable=cls._chat_id_nullable,
+        )
+
+    @declared_attr
+    def chat(cls) -> Mapped["Chat"]:
+        return relationship(
+            "Chat",
+            back_populates=cls._chat_back_populates,
+        )
+
+
+core/config.py
+
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    DB_ECHO: bool = False
+    POSTGRES_HOST: str
+    POSTGRES_PORT: int
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
+    # ... другие настройки ...
+
+    class Config:
+        env_file = "db.env"
+
+settings = Settings()
+
+bot/database/crud.py
+
+from sqlalchemy import select, func, distinct
+from sqlalchemy.sql import text
+from sqlalchemy.dialects.postgresql import array_agg
+from typing import Dict, List, Optional
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.ext.asyncio import AsyncSession
+from core.models.db_helper import db_helper
+from core.models.chat import Chat
+from core.models.message import Message
+from core.models.daily_report import DailyReport
+from core.models.dashboard_stats import DashboardStats
+from ..schemas.state import DashboardStats as DashboardStatsSchema
+from datetime import datetime, timedelta
+from core.models.daily_report import DailyReport
+from sqlalchemy import JSON
+from ..logger import setup_logger
+
+logger = setup_logger(__name__)
+
+async def get_all_chats() -> List[Chat]:
+    async for session in db_helper.get_session():
+        stmt = select(Chat)
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+async def get_latest_dashboard_stats(chat_id: str) -> DashboardStatsSchema:
+    async for session in db_helper.get_session():
+        stmt = select(DashboardStats).where(DashboardStats.chat_id == chat_id).order_by(DashboardStats.timestamp.desc()).limit(1)
+        result = await session.execute(stmt)
+        db_stats = result.scalar_one_or_none()
+        return DashboardStatsSchema(**db_stats.stats) if db_stats else None
+
+async def get_recent_messages(chat_id: str, limit: int = 100, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Message]:
+    async for session in db_helper.get_session():
+        query = select(Message).where(Message.chat_id == chat_id)
+        
+        if start_date:
+            query = query.where(Message.timestamp >= start_date)
+        if end_date:
+            query = query.where(Message.timestamp <= end_date)
+        
+        query = query.order_by(Message.timestamp.desc()).limit(limit)
+        
+        result = await session.execute(query)
+        return result.scalars().all()
+
+async def save_dashboard_stats(chat_id: str, stats: DashboardStatsSchema):
+    async for session in db_helper.get_session():
+        try:
+            db_stats = DashboardStats(chat_id=chat_id, stats=stats.dict())
+            session.add(db_stats)
+            await session.commit()
+            logger.info(f"Dashboard stats saved for chat {chat_id}")
+        except Exception as e:
+            logger.exception(f"Error saving dashboard stats for chat {chat_id}")
+            await session.rollback()
+            raise
+
+async def save_daily_report(chat_id: str, report: str, stats: dict):
+    async for session in db_helper.get_session():
+        try:
+            db_report = DailyReport(
+                chat_id=chat_id,
+                summary=report,
+                statistics=stats  # Добавляем статистику
+            )
+            session.add(db_report)
+            await session.commit()
+            logger.info(f"Daily report saved for chat {chat_id}")
+        except Exception as e:
+            logger.exception(f"Error saving daily report for chat {chat_id}")
+            await session.rollback()
+            raise
+
+
+async def get_weekly_stats(chat_id: str, start_date: datetime, end_date: datetime) -> Dict:
+    async for session in db_helper.get_session():
+        # Базовый запрос
+        base_query = select(Message).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        ).subquery()
+
+        # Общее количество сообщений и активных пользователей
+        count_query = select(
+            func.count().label('total_messages'),
+            func.count(distinct(base_query.c.user_id)).label('active_users')
+        )
+        
+        count_result = await session.execute(count_query)
+        counts = count_result.fetchone()
+
+        # Распределение по настроению
+        sentiment_query = select(
+            base_query.c.sentiment,
+            func.count().label('count')
+        ).group_by(base_query.c.sentiment)
+        
+        sentiment_result = await session.execute(sentiment_query)
+        sentiment_distribution = dict(sentiment_result.fetchall())
+
+        # Распределение по типу действия
+        action_query = select(
+            base_query.c.action_type,
+            func.count().label('count')
+        ).group_by(base_query.c.action_type)
+        
+        action_result = await session.execute(action_query)
+        action_type_distribution = dict(action_result.fetchall())
+
+        # Ключевые темы и потенциальные угрозы
+        topics_query = select(func.unnest(base_query.c.key_topics).label('topic')).distinct()
+        threats_query = select(func.unnest(base_query.c.potential_threats).label('threat')).distinct()
+        
+        topics_result = await session.execute(topics_query)
+        threats_result = await session.execute(threats_query)
+        
+        key_topics = [row.topic for row in topics_result.fetchall() if row.topic]
+        potential_threats = [row.threat for row in threats_result.fetchall() if row.threat]
+
+        return {
+            'total_messages': counts.total_messages,
+            'active_users': counts.active_users,
+            'sentiment_distribution': sentiment_distribution,
+            'action_type_distribution': action_type_distribution,
+            'key_topics': key_topics,
+            'potential_threats': potential_threats
+        }
+
+
+async def get_top_topics(chat_id: str, start_date: datetime, end_date: datetime, limit: int = 10) -> List[str]:
+    async for session in db_helper.get_session():
+        stmt = select(
+            Message.key_topics,
+            func.count(Message.id).label('count')
+        ).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        ).group_by(
+            Message.key_topics
+        ).order_by(
+            func.count(Message.id).desc()
+        ).limit(limit)
+        result = await session.execute(stmt)
+        return [", ".join(row.key_topics) for row in result.all()]
+
+async def get_weekly_threats(chat_id: str, start_date: datetime, end_date: datetime) -> List[str]:
+    async for session in db_helper.get_session():
+        stmt = select(Message.potential_threats).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date),
+            Message.potential_threats != None
+        )
+        result = await session.execute(stmt)
+        threats = [threat for row in result.all() for threat in row.potential_threats]
+        return list(set(threats))  # Remove duplicates
+
+async def save_message(chat_id: str, user_id: str, content: str, sentiment: str, action_type: str, potential_threats: List[str], key_topics: List[str]):
+    async for session in db_helper.get_session():
+        message = Message(
+            chat_id=chat_id,
+            user_id=user_id,
+            content=content,
+            sentiment=sentiment,
+            action_type=action_type,
+            potential_threats=potential_threats,
+            key_topics=key_topics
+        )
+        session.add(message)
+        await session.commit()
+        return message
+
+async def get_daily_stats(chat_id: str, start_date: datetime, end_date: datetime):
+    async for session in db_helper.get_session():
+        # Запрос для подсчета сообщений и активных пользователей
+        count_query = select(
+            func.count(Message.id).label('total_messages'),
+            func.count(distinct(Message.user_id)).label('active_users')
+        ).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        )
+        
+        # Запрос для распределения настроений
+        sentiment_query = select(
+            Message.sentiment,
+            func.count(Message.id).label('count')
+        ).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        ).group_by(Message.sentiment)
+        
+        # Запрос для распределения типов действий
+        action_query = select(
+            Message.action_type,
+            func.count(Message.id).label('count')
+        ).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        ).group_by(Message.action_type)
+        
+        # Запрос для ключевых тем
+        topics_query = select(
+            func.unnest(Message.key_topics).label('topic'),
+            func.count().label('count')
+        ).where(
+            Message.chat_id == chat_id,
+            Message.timestamp.between(start_date, end_date)
+        ).group_by(text('topic')).order_by(text('count DESC')).limit(5)
+        
+        # Выполнение запросов
+        counts_result = await session.execute(count_query)
+        counts = counts_result.first()
+        
+        sentiments_result = await session.execute(sentiment_query)
+        sentiments = {row.sentiment: row.count for row in sentiments_result}
+        
+        actions_result = await session.execute(action_query)
+        actions = {row.action_type: row.count for row in actions_result}
+        
+        topics_result = await session.execute(topics_query)
+        topics = {row.topic: row.count for row in topics_result}
+        
+        return {
+            'message_count': counts.total_messages if counts else 0,
+            'active_users': counts.active_users if counts else 0,
+            'sentiment_distribution': sentiments,
+            'action_distribution': actions,
+            'top_topics': topics
+        }
+
+ЭТОТ ПРИМЕР БЫЛ ТОЛЬКО ДЛЯ ОЗНАКОМЛЕНИЯ, НЕ НАДО ПОВТОРЯТЬ ТЕ ЖЕ МЕТОДЫ CRUD.
+Теперь про api и нейронку.
+Давай сделаем прогу для ее обучения, и потом в api посмотрим как будет выглядеть inference.
+
+Далее нужно сделать все описанные функциональные компоненты, эндпоинты к ним, а также задуматься как департамент может их изменять и расширять. Оцениваться будет именно кодовая база, поэтому хорошо поработаем над проектом.
