@@ -26,4 +26,10 @@ async def get_tasks(
     session: AsyncSession = Depends(db_helper.scoped_session_dependency),
 ):
     tasks = await get_active_tasks(session)
-    return [TaskResponse.from_orm(task) for task in tasks]
+    print(tasks[0])
+    answer = []
+    for task in tasks:
+        ans = task.__dict__
+        ans["status"] = 255
+        answer.append(TaskResponse(**ans))
+    return answer

@@ -7,6 +7,7 @@ class TaskCreate(BaseModel):
     title: str
     description: str = None
     image: str
+    status: int = 256
 
 class TaskResponse(BaseModel):
     id: int
