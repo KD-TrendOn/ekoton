@@ -8,8 +8,39 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device)
 print('Model downloaded')
 # Список классов для классификации
-CLASSES = ["Buffalo", "Elephant", "Rhino", "Zebra", "Beaver", "Owl"]
+CLASSES = [
+    "Pink small sparrow",
+    "Gray black magpie",
+    "Bat",
+    "Light-colored ferret",
+    "Pink flower",
+    "White-backed Woodpecker",
+    "Mole",
+    "Hedgehog",
+    "Blue bird with orange belly",
+    "bird mottled hoopoe",
+    "Blue flower",
+    "Owl",
+    "Dark-colored ferret",
+    "Yellow flower"
+]
 
+MAPPIN = [
+    "Урагус сибирский",
+    "Серый сорокопут",
+    "Рыжая вечерница",
+    "Горностай",
+    "Хохлатка полая",
+    "Белоспинный дятел",
+    "Обыкновенная кутора",
+    "Обыкновенный еж",
+    "Зимородок",
+    "Удод",
+    "Незабудка болотная",
+    "Филин",
+    "Лесной хорек",
+    "Лютик длиннолистный"
+]
 def classify_image(image_data: bytes) -> str:
     # Преобразование байтов изображения в объект PIL Image
     image = Image.open(io.BytesIO(image_data))
@@ -32,4 +63,4 @@ def classify_image(image_data: bytes) -> str:
     values, indices = similarity[0].topk(1)
 
     # Возвращение предсказанного класса
-    return CLASSES[indices[0]]
+    return MAPPIN[indices[0]]
