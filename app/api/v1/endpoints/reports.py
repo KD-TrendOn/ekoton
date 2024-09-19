@@ -6,7 +6,7 @@ from app.schemas.reports import ParkReport
 from db.crud import get_submissions_within_park
 from db.db_helper import db_helper
 from collections import Counter
-
+from app.ml.classifier import MAPPIN
 router = APIRouter(
     prefix="/reports",
     tags=["Reports"],
@@ -22,6 +22,6 @@ async def get_park_report(
     class_counts = Counter(sub.object_class for sub in submissions)
     
     # Создание словаря с количеством для каждого класса
-    statistics = {class_name: class_counts.get(class_name, 0) for class_name in CLASSES}
+    statistics = {class_name: class_counts.get(class_name, 0) for class_name in MAPPIN}
     
     return ParkReport(statistics=statistics)
